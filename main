@@ -1,0 +1,170 @@
+ ; Archivo:	  main.s  
+ ; Dispositivo:	  PIC16F887
+ ; Autor:	  Javier López
+ ; Compilador:	  pic-as (v2.30), MPLAB V5.40
+ ; 
+ ; Programa:	  Sumador de contadores
+ ; Harware:	  LEDS en puertos A, C, y D push pull downs en puerto B
+ ; 
+ ; Creado: 03 agosto, 2021
+ ; Última modificación: 05 agosto, 2021
+  
+ PROCESSOR 16F887
+ #include <xc.inc>
+ 
+ ;configuration word 1
+ CONFIG FOSC=INTRC_NOCLKOUT	// Oscillador Interno sin salidas
+ CONFIG WDTE=OFF    // WDT disabled (reinicio repetitivo del pic)
+ CONFIG PWRTE=ON    // PWRT enabled (espera de 72ms al iniciar)
+ CONFIG MCLRE=OFF   // El pin de MCLR se utiliza como I/O
+ CONFIG CP=OFF	    // Sin protección de código
+ CONFIG CPD=OFF	    // Sin protección de datos
+ 
+ CONFIG BOREN=OFF   // Sin reinicio cuando el voltaje de alimentación baja de 4V
+ CONFIG IESO=OFF    // Reinicio sin cambio de reloj de interno a externo
+ CONFIG FCMEN=OFF   // Cambio de reloj externo a interno en caso de fallo
+ CONFIG LVP=ON	    // programación en bajo voltaje permitida
+ 
+ ;configuration word 2
+ CONFIG WRT=OFF	    // Protección de autoescritura por el programa desactivada
+ CONFIG BOR4V=BOR40V// Reinicio abajo de 4V, (BOR21V=2.1V)
+ 
+ PSECT udata_bank0 ; common memory
+    cont:	DS  2	; 2 byte
+ 
+ PSECT resVect, class=CODE, abs, delta=2
+ 
+ ;------------------Reset--------------------
+ ORG 00h	; posición 0000h para el reset
+ resetVec:
+     PAGESEL main
+     goto main
+     
+ PSECT code, delta=2, abs
+ ORG 100h	; posición para el código
+ 
+ ;-------------configuración-------------
+ main:
+    call config_io
+    call config_reloj	; se llama a las configuraciones del PIC
+ 
+ ;-------------loop principal------------
+ loop:
+    BANKSEL PORTA
+    
+    btfsc   PORTB, 0
+    call    inc_porta
+    btfsc   PORTB, 1
+    call    dec_porta	; asignar a puertos de b el contador en puerto a
+    
+    btfsc   PORTB, 2
+    call    inc_portc
+    btfsc   PORTB, 3
+    call    dec_portc	; asgindar a puertos de b el contador en puerto c
+    
+    btfsc   PORTB, 4
+    call    sumar	; asignar a puerto de b el control del sumador
+    
+    goto    loop	; crear un ciclo infinito de estas instrucciones
+ 
+ ;-------------sub rutinas-----------------
+ 
+ config_io:
+    banksel ANSEL	; banco 11
+    clrf    ANSEL	; seleccionar pines como digitales
+    clrf    ANSELH 
+    
+    banksel TRISA	; banco 01
+    clrf    TRISA	; puerto a como salida
+    bsf	    TRISB, 0
+    bsf	    TRISB, 1	
+    bsf	    TRISB, 2
+    bsf	    TRISB, 3	
+    bsf	    TRISB, 4	; puertos 0, 1, 2, 3, 4 de b como entradas
+    clrf    TRISC	; puerto c como salida 
+    clrf    TRISD	; puerto d como salida
+    
+    banksel PORTA
+    clrf    PORTA	
+    clrf    PORTC	
+    clrf    PORTD	; puertos a, c y d inician en 0
+    return
+ 
+ config_reloj:
+    banksel OSCCON
+    bsf	    OSCCON, 6
+    bcf	    OSCCON, 5
+    bcf	    OSCCON, 4	; frecuencia a 100 -> 1MHz
+    bsf	    OSCCON, 0	; reloj interno seleccionado
+    return
+ 
+ delay:
+    movlw   200		; valor inicial del delay
+    movwf   cont	; asignar a variable cont el valor inicial
+    decfsz  cont, 1	; bajar valor a cont
+    goto    $-1		; seguir bajando el valor de cont hasta 0
+    return
+     
+ inc_porta:
+    call    delay
+    btfsc   PORTB, 0	; incrementar el valor de puerto a cuando se suelte el
+    goto    $-1		; botón 0 del puerto b
+    incf    PORTA
+    
+    btfsc   PORTA, 4	; chequear el bit 4 del puerto a
+    clrf    PORTA	; vaciar porta si pasa de 4 bits
+    return
+    
+ dec_porta:
+    call    delay
+    btfsc   PORTB, 1	; decrementar el valor de puerto a cuando se suelte el
+    goto    $-1		; botón 1 del puerto b
+    decf    PORTA
+    
+    btfsc   PORTA, 4	; chequear el bit 4 del puerto a
+    call    todo_setA	; llenar portc si pasa de 4 bits (en reversa)
+    return
+    
+ inc_portc:
+    call    delay
+    btfsc   PORTB, 2	; incrementar el valor de puerto c cuando se suelte el
+    goto    $-1		; botón 2 del puerto b
+    incf    PORTC
+    
+    btfsc   PORTC, 4	; chequear el bit 4 del puerto c
+    clrf    PORTC	; vaciar porta si pasa de 4 bits
+    return
+    
+ dec_portc:
+    call    delay
+    btfsc   PORTB, 3	; decrementar el valor de puerto c cuando se suelte el
+    goto    $-1		; botón 3 del puerto b
+    decf    PORTC
+    
+    btfsc   PORTC, 4	; chequear el bit 4 del puerto c
+    call    todo_setC	; llenar portc si pasa de 4 bits
+    return
+
+ todo_setA:
+    clrf    PORTA	; apagar todo el puerto a
+    bsf	    PORTA, 0
+    bsf	    PORTA, 1
+    bsf	    PORTA, 2
+    bsf	    PORTA, 3	; encender los 4 primeros bits de a
+    return
+ 
+ todo_setC:
+    clrf    PORTC	; apagar todo el puerto c
+    bsf	    PORTC, 0
+    bsf	    PORTC, 1
+    bsf	    PORTC, 2
+    bsf	    PORTC, 3	; encender los 4 primeros bits de c
+    return
+ 
+ sumar:
+    movf    PORTA, 0	; mover port a hacia w
+    addwf   PORTC, 0	; sumar w (port a) y f (port c), almacenar en w
+    movwf   PORTD	; mover w a port d
+    return
+    
+ END
